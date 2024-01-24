@@ -1,0 +1,3 @@
+C:/Users/Jakey/Desktop/Spring2024/CSCE441/A1/build/CMakeFiles/A1.dir
+C:/Users/Jakey/Desktop/Spring2024/CSCE441/A1/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/Jakey/Desktop/Spring2024/CSCE441/A1/build/CMakeFiles/ZERO_CHECK.dir
