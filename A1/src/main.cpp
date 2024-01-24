@@ -68,7 +68,7 @@ void task_one(const vector<Vertex>& vertices, const string& outFName, int imageW
 			tri.vertices[j].y = finalScale * vertices[i + j].y + translationY;
 		}
 
-		compute_bounding_box(vector<Vertex>(tri.vertices, tri.vertices + 3), tri.minX, tri.maxX, tri.minY, tri.maxY);
+		compute_bounding_box({ tri.vertices[0], tri.vertices[1], tri.vertices[2] }, tri.minX, tri.maxX, tri.minY, tri.maxY);
 
 		int colorIndex = (i / 3) % 7;
 		unsigned char r = static_cast<unsigned char>(RANDOM_COLORS[colorIndex][0] * 255);
@@ -125,7 +125,7 @@ void task_two(const vector<Vertex>& vertices, const string& outFName, int imageW
 			tri.vertices[j].y = finalScale * vertices[i + j].y + translationY;
 		}
 
-		compute_bounding_box(vector<Vertex>(tri.vertices, tri.vertices + 3), tri.minX, tri.maxX, tri.minY, tri.maxY);
+		compute_bounding_box({ tri.vertices[0], tri.vertices[1], tri.vertices[2] }, tri.minX, tri.maxX, tri.minY, tri.maxY);
 
 		int boundBoxMinX = max(static_cast<int>(floor(tri.minX)), 0);
 		int boundBoxMaxX = min(static_cast<int>(ceil(tri.maxX)), imageWidth - 1);
@@ -159,17 +159,17 @@ void task_two(const vector<Vertex>& vertices, const string& outFName, int imageW
 
 
 
-void baryc_triangle_task3(float x, float y, const Vertex& v0, const Vertex& v1, const Vertex& v2, float& a, float& b, float& c) {
+void baryc_triangle_task3(float x, float y, const Vertex& v0, const Vertex& v1, const Vertex& v2, float& a, float& b, float& c){
 	float det = (v1.y - v2.y) * (v0.x - v2.x) + (v2.x - v1.x) * (v0.y - v2.y);
 	a = ((v1.y - v2.y) * (x - v2.x) + (v2.x - v1.x) * (y - v2.y)) / det;
 	b = ((v2.y - v0.y) * (x - v2.x) + (v0.x - v2.x) * (y - v2.y)) / det;
 	c = 1.0f - a - b;
 }
 
-void task_three(vector<Vertex>& vertices, const string& outFName, int imageWidth, int imageHeight) {
+void task_three(vector<Vertex>& vertices, const string& outFName, int imageWidth, int imageHeight){
 	Image image(imageWidth, imageHeight);
 
-	for (auto& vertex : vertices) {
+	for (auto& vertex : vertices){
 		int colorIndex = rand() % 7;
 		vertex.r = static_cast<unsigned char>(RANDOM_COLORS[colorIndex][0] * 255);
 		vertex.g = static_cast<unsigned char>(RANDOM_COLORS[colorIndex][1] * 255);
@@ -185,9 +185,9 @@ void task_three(vector<Vertex>& vertices, const string& outFName, int imageWidth
 	float translationX = (imageWidth - finalScale * (maxX + minX)) / 2;
 	float translationY = (imageHeight - finalScale * (minY + maxY)) / 2;
 
-	for (size_t i = 0; i < vertices.size(); i += 3) {
+	for (size_t i = 0; i < vertices.size(); i += 3){
 		Triangle tri;
-		for (int j = 0; j < 3; ++j) {
+		for (int j = 0; j < 3; ++j){
 			tri.vertices[j].x = finalScale * vertices[i + j].x + translationX;
 			tri.vertices[j].y = finalScale * vertices[i + j].y + translationY;
 			tri.vertices[j].r = vertices[i + j].r;
@@ -202,19 +202,77 @@ void task_three(vector<Vertex>& vertices, const string& outFName, int imageWidth
 		int boundBoxMinY = max(static_cast<int>(floor(tri.minY)), 0);
 		int boundBoxMaxY = min(static_cast<int>(ceil(tri.maxY)), imageHeight - 1);
 
-		for (int y = boundBoxMinY; y <= boundBoxMaxY; ++y) {
-			for (int x = boundBoxMinX; x <= boundBoxMaxX; ++x) {
+		for (int y = boundBoxMinY; y <= boundBoxMaxY; ++y){
+			for (int x = boundBoxMinX; x <= boundBoxMaxX; ++x){
 				float alpha, beta, gamma;
 				baryc_triangle_task3(x, y, tri.vertices[0], tri.vertices[1], tri.vertices[2], alpha, beta, gamma);
 
-				if (alpha >= 0 && beta >= 0 && gamma >= 0) {
+				if (alpha >= 0 && beta >= 0 && gamma >= 0){
 					unsigned char r = static_cast<unsigned char>(alpha * tri.vertices[0].r + beta * tri.vertices[1].r + gamma * tri.vertices[2].r);
 					unsigned char g = static_cast<unsigned char>(alpha * tri.vertices[0].g + beta * tri.vertices[1].g + gamma * tri.vertices[2].g);
 					unsigned char b = static_cast<unsigned char>(alpha * tri.vertices[0].b + beta * tri.vertices[1].b + gamma * tri.vertices[2].b);
 
-					if (x >= 0 && x < imageWidth && y >= 0 && y < imageHeight) {
+					if (x >= 0 && x < imageWidth && y >= 0 && y < imageHeight){
 						image.setPixel(x, y, r, g, b);
 					}
+				}
+			}
+		}
+	}
+
+	image.writeToFile(outFName);
+}
+
+
+
+void task_four(vector<Vertex>& vertices, const string& outFName, int imageWidth, int imageHeight){
+	Image image(imageWidth, imageHeight);
+
+	float minX, maxX, minY, maxY;
+	compute_bounding_box(vertices, minX, maxX, minY, maxY);
+
+	for (auto& vertex : vertices){
+		float lerpFactor = (vertex.y - minY) / (maxY - minY);
+		vertex.r = static_cast<unsigned char>(255 * lerpFactor);
+		vertex.b = static_cast<unsigned char>(255 * (1 - lerpFactor));
+		vertex.g = 0;
+	}
+
+	float scaleX = imageWidth / (maxX - minX);
+	float scaleY = imageHeight / (maxY - minY);
+	float finalScale = min(scaleX, scaleY);
+	float translationX = (imageWidth - finalScale * (maxX + minX)) / 2;
+	float translationY = (imageHeight - finalScale * (minY + maxY)) / 2;
+
+	for (size_t i = 0; i < vertices.size(); i += 3){
+		Triangle tri;
+		for (int j = 0; j < 3; ++j){
+			tri.vertices[j].x = finalScale * vertices[i + j].x + translationX;
+			tri.vertices[j].y = finalScale * vertices[i + j].y + translationY;
+			tri.vertices[j].r = vertices[i + j].r;
+			tri.vertices[j].g = vertices[i + j].g;
+			tri.vertices[j].b = vertices[i + j].b;
+		}
+
+		compute_bounding_box({ tri.vertices[0], tri.vertices[1], tri.vertices[2] }, tri.minX, tri.maxX, tri.minY, tri.maxY);
+
+		int boundBoxMinX = max(static_cast<int>(floor(tri.minX)), 0);
+		int boundBoxMaxX = min(static_cast<int>(ceil(tri.maxX)), imageWidth - 1);
+		int boundBoxMinY = max(static_cast<int>(floor(tri.minY)), 0);
+		int boundBoxMaxY = min(static_cast<int>(ceil(tri.maxY)), imageHeight - 1);
+
+		for (int y = boundBoxMinY; y <= boundBoxMaxY; ++y){
+			for (int x = boundBoxMinX; x <= boundBoxMaxX; ++x){
+				float alpha, beta, gamma;
+				baryc_triangle_task3(x, y, tri.vertices[0], tri.vertices[1], tri.vertices[2], alpha, beta, gamma);
+
+				if (alpha >= 0 && beta >= 0 && gamma >= 0){
+					// Interpolate the color for the current pixel
+					unsigned char r = static_cast<unsigned char>(alpha * tri.vertices[0].r + beta * tri.vertices[1].r + gamma * tri.vertices[2].r);
+					unsigned char g = static_cast<unsigned char>(alpha * tri.vertices[0].g + beta * tri.vertices[1].g + gamma * tri.vertices[2].g);
+					unsigned char b = static_cast<unsigned char>(alpha * tri.vertices[0].b + beta * tri.vertices[1].b + gamma * tri.vertices[2].b);
+
+					image.setPixel(x, y, r, g, b);
 				}
 			}
 		}
@@ -236,7 +294,7 @@ void task_three(vector<Vertex>& vertices, const string& outFName, int imageWidth
 
 
 
-int main(int argc, char** argv){
+int main(int argc, char** argv) {
 	if (argc < 6){
 		cout << "Usage: ./A1 ../../resources/*object*.obj <output name> <x-axis> <y-axis> <Task #>" << endl;
 		return 1;
@@ -309,9 +367,12 @@ int main(int argc, char** argv){
 		task_two(vertices, outFName, imageWidth, imageHeight);
 	} else if (taskNumber == 3){
 		task_three(vertices, outFName, imageWidth, imageHeight);
+	} else if (taskNumber == 4) {
+		task_four(vertices, outFName, imageWidth, imageHeight);
 	}
 
 	cout << "Number of vertices: " << posBuf.size() / 3 << endl;
 
 	return 0;
 }
+
