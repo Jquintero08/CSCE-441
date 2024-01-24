@@ -284,7 +284,62 @@ void task_four(vector<Vertex>& vertices, const string& outFName, int imageWidth,
 
 
 
+void task_five(vector<Vertex>& vertices, const string& outFName, int imageWidth, int imageHeight) {
+	Image image(imageWidth, imageHeight);
+	vector<float> zBuffer(imageWidth * imageHeight, numeric_limits<float>::lowest());
 
+	float minZ = numeric_limits<float>::max();
+	float maxZ = numeric_limits<float>::lowest();
+	for (const auto& vertex : vertices) {
+		minZ = min(minZ, vertex.z);
+		maxZ = max(maxZ, vertex.z);
+	}
+
+	float minX, maxX, minY, maxY;
+	compute_bounding_box(vertices, minX, maxX, minY, maxY);
+
+	float scaleX = imageWidth / (maxX - minX);
+	float scaleY = imageHeight / (maxY - minY);
+	float finalScale = min(scaleX, scaleY);
+	float translationX = (imageWidth - finalScale * (maxX + minX)) / 2;
+	float translationY = (imageHeight - finalScale * (minY + maxY)) / 2;
+
+	for (size_t i = 0; i < vertices.size(); i += 3) {
+		Triangle tri;
+		for (int j = 0; j < 3; ++j) {
+			tri.vertices[j].x = finalScale * vertices[i + j].x + translationX;
+			tri.vertices[j].y = finalScale * vertices[i + j].y + translationY;
+			tri.vertices[j].z = vertices[i + j].z;
+		}
+
+		compute_bounding_box({ tri.vertices[0], tri.vertices[1], tri.vertices[2] }, tri.minX, tri.maxX, tri.minY, tri.maxY);
+
+		int boundBoxMinX = max(static_cast<int>(floor(tri.minX)), 0);
+		int boundBoxMaxX = min(static_cast<int>(ceil(tri.maxX)), imageWidth - 1);
+		int boundBoxMinY = max(static_cast<int>(floor(tri.minY)), 0);
+		int boundBoxMaxY = min(static_cast<int>(ceil(tri.maxY)), imageHeight - 1);
+
+		for (int y = boundBoxMinY; y <= boundBoxMaxY; ++y) {
+			for (int x = boundBoxMinX; x <= boundBoxMaxX; ++x) {
+				float alpha, beta, gamma;
+				baryc_triangle_task3(x, y, tri.vertices[0], tri.vertices[1], tri.vertices[2], alpha, beta, gamma);
+
+				if (alpha >= 0 && beta >= 0 && gamma >= 0) {
+					float pixelZ = alpha * tri.vertices[0].z + beta * tri.vertices[1].z + gamma * tri.vertices[2].z;
+					int zIndex = y * imageWidth + x;
+
+					if (pixelZ > zBuffer[zIndex]) {
+						unsigned char redVal = static_cast<unsigned char>((pixelZ - minZ) / (maxZ - minZ) * 255);
+						image.setPixel(x, y, redVal, 0, 0);
+						zBuffer[zIndex] = pixelZ;
+					}
+				}
+			}
+		}
+	}
+
+	image.writeToFile(outFName);
+}
 
 
 
@@ -369,10 +424,11 @@ int main(int argc, char** argv) {
 		task_three(vertices, outFName, imageWidth, imageHeight);
 	} else if (taskNumber == 4) {
 		task_four(vertices, outFName, imageWidth, imageHeight);
+	} else if (taskNumber == 5) {
+		task_five(vertices, outFName, imageWidth, imageHeight);
 	}
 
 	cout << "Number of vertices: " << posBuf.size() / 3 << endl;
 
 	return 0;
 }
-
