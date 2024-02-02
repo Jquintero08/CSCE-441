@@ -1,0 +1,3 @@
+﻿  main.cpp
+C:\Users\Jakey\Desktop\Spring2024\CSCE441\A2\src\main.cpp(310,13): warning C4244: 'argument': conversion from 'double' to 'float', possible loss of data
+  A2.vcxproj -> C:\Users\Jakey\Desktop\Spring2024\CSCE441\A2\build\Debug\A2.exe
