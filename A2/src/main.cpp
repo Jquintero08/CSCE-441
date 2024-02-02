@@ -44,48 +44,62 @@ public:
 	glm::vec3 rotateJoint;
 	glm::vec3 transMesh;
 	glm::vec3 scale;
-	std::shared_ptr<Shape> mesh;
-	std::vector<std::shared_ptr<Component>> children;
+	shared_ptr<Shape> mesh;
+	vector<shared_ptr<Component>> children;
+	glm::vec3 rotationAnimation;
 
-	Component(std::shared_ptr<Shape> mesh) :
+	Component(shared_ptr<Shape> mesh) :
 		transJoint(0.0f),
 		rotateJoint(0.0f),
 		transMesh(0.0f),
 		scale(1.0f),
+		rotationAnimation(0.0f),
 		mesh(mesh) {}
 
-	void addChild(std::shared_ptr<Component> child) {
+	void add_child(shared_ptr<Component> child) {
 		children.push_back(child);
 	}
 
-	void Component::draw(std::shared_ptr<MatrixStack> MV) {
+	void Component::draw(shared_ptr<MatrixStack> MV) {
 		MV->pushMatrix();
 
 		MV->translate(transJoint);
 
-		if (jointSphere) {
-			MV->pushMatrix();
-			MV->scale(glm::vec3(0.5f, 0.5f, 0.5f)); //Size of the sphere on the joints
-			glUniformMatrix4fv(prog->getUniform("MV"), 1, GL_FALSE, glm::value_ptr(MV->topMatrix()));
-			jointSphere->draw(prog);
-			MV->popMatrix();
-		}
+
 
 		MV->rotate(rotateJoint.x, glm::vec3(1.0f, 0.0f, 0.0f));
 		MV->rotate(rotateJoint.y, glm::vec3(0.0f, 1.0f, 0.0f));
 		MV->rotate(rotateJoint.z, glm::vec3(0.0f, 0.0f, 1.0f));
 
+		if (jointSphere) {
+			MV->pushMatrix();
+			MV->rotate(rotationAnimation.x, glm::vec3(1.0f, 0.0f, 0.0f)); //Animate the spheres with the actual part
+			MV->rotate(rotationAnimation.y, glm::vec3(0.0f, 1.0f, 0.0f));
+			MV->rotate(rotationAnimation.z, glm::vec3(0.0f, 0.0f, 1.0f));
+			MV->scale(glm::vec3(0.7f, 0.7f, 0.7f)); //Size of the sphere on the joints
+			glUniformMatrix4fv(prog->getUniform("MV"), 1, GL_FALSE, glm::value_ptr(MV->topMatrix()));
+			jointSphere->draw(prog);
+			MV->popMatrix();
+		}
+
 		MV->translate(transMesh);
 
 		MV->scale(scale);
 
+
+		MV->pushMatrix();
+		MV->rotate(rotationAnimation.x, glm::vec3(1.0f, 0.0f, 0.0f));
+		MV->rotate(rotationAnimation.y, glm::vec3(0.0f, 1.0f, 0.0f));
+		MV->rotate(rotationAnimation.z, glm::vec3(0.0f, 0.0f, 1.0f));
+
 		glUniformMatrix4fv(prog->getUniform("MV"), 1, GL_FALSE, glm::value_ptr(MV->topMatrix()));
 		mesh->draw(prog);
+		MV->popMatrix();
 
 		for (const auto& child : children) {
 			MV->pushMatrix();
 
-			MV->scale(1.0f / scale.x, 1.0f / scale.y, 1.0f / scale.z); //Children should not inherit size
+			MV->scale(1.0f / scale.x, 1.0f / scale.y, 1.0f / scale.z); //Children will not inherit size (took 3 hours to figure out this problem -_-)
 
 			child->draw(MV);
 
@@ -96,11 +110,143 @@ public:
 	}
 };
 
+class Robot {
+public:
+	shared_ptr<Component> torso;
+	shared_ptr<Component> head;
+	shared_ptr<Component> upperLeftArm;
+	shared_ptr<Component> lowerLeftArm;
+	shared_ptr<Component> upperRightArm;
+	shared_ptr<Component> lowerRightArm;
+	shared_ptr<Component> upperLeftLeg;
+	shared_ptr<Component> lowerLeftLeg;
+	shared_ptr<Component> upperRightLeg;
+	shared_ptr<Component> lowerRightLeg;
+	vector<shared_ptr<Component>> componentList;
+	shared_ptr<Component> selectedComp;
 
-std::shared_ptr<Component> root;
 
+	Robot(shared_ptr<Shape> shape) {
+		torso = make_shared<Component>(shape);
+		head = make_shared<Component>(shape);
+		upperLeftArm = make_shared<Component>(shape);
+		lowerLeftArm = make_shared<Component>(shape);
+		upperRightArm = make_shared<Component>(shape);
+		lowerRightArm = make_shared<Component>(shape);
+		upperLeftLeg = make_shared<Component>(shape);
+		lowerLeftLeg = make_shared<Component>(shape);
+		upperRightLeg = make_shared<Component>(shape);
+		lowerRightLeg = make_shared<Component>(shape);
 
+		hierarchy_setup();
+		transform_setup();
+		selectedComp = torso;
+	}
+	void populate_component_list() {
+		componentList.clear();
+		componentList.push_back(torso);
+		componentList.push_back(head);
+		componentList.push_back(upperLeftArm);
+		componentList.push_back(lowerLeftArm);
+		componentList.push_back(upperRightArm);
+		componentList.push_back(lowerRightArm);
+		componentList.push_back(upperLeftLeg);
+		componentList.push_back(lowerLeftLeg);
+		componentList.push_back(upperRightLeg);
+		componentList.push_back(lowerRightLeg);
+	}
+	shared_ptr<Component> get_next_component(bool next = true) {
+		static size_t currentIndex = 0;
+		if (next) {
+			currentIndex = (currentIndex + 1) % componentList.size();
+		}
+		else {
+			if (currentIndex == 0) {
+				currentIndex = componentList.size() - 1;
+			}
+			else {
+				--currentIndex;
+			}
+		}
+		return componentList[currentIndex];
+	}
+private:
+	void hierarchy_setup() {
+		torso->add_child(head);
+		torso->add_child(upperLeftArm);
+		torso->add_child(upperRightArm);
+		torso->add_child(upperLeftLeg);
+		torso->add_child(upperRightLeg);
+		upperLeftArm->add_child(lowerLeftArm);
+		upperRightArm->add_child(lowerRightArm);
+		upperLeftLeg->add_child(lowerLeftLeg);
+		upperRightLeg->add_child(lowerRightLeg);
+	}
 
+	void transform_setup() {
+		//TORSO
+		torso->transJoint = glm::vec3(0.0f, 0.0f, 0.0f);
+		torso->rotateJoint = glm::vec3(0.1f, 0.0f, 0.0f); //Rotation
+		torso->transMesh = glm::vec3(0.0f, 0.0f, 0.0f);
+		torso->scale = glm::vec3(1.5f, 2.5f, 1.0f);
+
+		//HEAD
+		head->transJoint = glm::vec3(0.0f, 1.55f, 0.0f);
+		head->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		head->transMesh = glm::vec3(0.0f, 0.0f, 0.0f);
+		head->scale = glm::vec3(0.75f, 0.75f, 0.75f);
+
+		//UPPER LEFT ARM
+		upperLeftArm->transJoint = glm::vec3(-0.75f, 0.95f, 0.0f);
+		upperLeftArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		upperLeftArm->transMesh = glm::vec3(-0.75f, 0.0f, 0.0f);
+		upperLeftArm->scale = glm::vec3(1.5f, 0.5f, 0.5f);
+
+		//LOWER LEFT ARM
+		lowerLeftArm->transJoint = glm::vec3(-0.8f, 0.0f, 0.0f);
+		lowerLeftArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		lowerLeftArm->transMesh = glm::vec3(-0.6f, 0.0f, 0.0f);
+		lowerLeftArm->scale = glm::vec3(1.35f, 0.40f, 0.40f);
+
+		//UPPER RIGHT ARM
+		upperRightArm->transJoint = glm::vec3(0.75f, 0.95f, 0.0f);
+		upperRightArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		upperRightArm->transMesh = glm::vec3(0.75f, 0.0f, 0.0f);
+		upperRightArm->scale = glm::vec3(1.5f, 0.5f, 0.5f);
+
+		//LOWER RIGHT ARM
+		lowerRightArm->transJoint = glm::vec3(0.8f, 0.0f, 0.0f);
+		lowerRightArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		lowerRightArm->transMesh = glm::vec3(0.6f, 0.0f, 0.0f);
+		lowerRightArm->scale = glm::vec3(1.35f, 0.40f, 0.40f);
+
+		//UPPER LEFT LEG
+		upperLeftLeg->transJoint = glm::vec3(-0.35f, -1.25f, 0.0f);
+		upperLeftLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		upperLeftLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
+		upperLeftLeg->scale = glm::vec3(0.60f, 1.6f, 0.60f);
+
+		//LOWER LEFT LEG
+		lowerLeftLeg->transJoint = glm::vec3(0.0f, -0.75f, 0.0f);
+		lowerLeftLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		lowerLeftLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
+		lowerLeftLeg->scale = glm::vec3(0.5f, 1.5f, 0.50f);
+
+		//UPPER RIGHT LEG
+		upperRightLeg->transJoint = glm::vec3(0.35f, -1.25f, 0.0f);
+		upperRightLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		upperRightLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
+		upperRightLeg->scale = glm::vec3(0.60f, 1.6f, 0.60f);
+
+		//LOWER RIGHT LEG
+		lowerRightLeg->transJoint = glm::vec3(0.0f, -0.75f, 0.0f);
+		lowerRightLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
+		lowerRightLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
+		lowerRightLeg->scale = glm::vec3(0.5f, 1.5f, 0.50f);
+	}
+};
+
+unique_ptr<Robot> robot;
 
 
 static void error_callback(int error, const char *description)
@@ -108,12 +254,46 @@ static void error_callback(int error, const char *description)
 	cerr << description << endl;
 }
 
-static void key_callback(GLFWwindow *window, int key, int scancode, int action, int mods)
-{
-	if(key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
-		glfwSetWindowShouldClose(window, GL_TRUE);
+static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods) {
+	if (action == GLFW_PRESS || action == GLFW_REPEAT) {
+		switch (key) {
+		case GLFW_KEY_PERIOD: //Forward in hierarchy
+			robot->selectedComp = robot->get_next_component(true);
+			break;
+		case GLFW_KEY_COMMA: //Backward in hierarchy
+			robot->selectedComp = robot->get_next_component(false);
+			break;
+		case GLFW_KEY_X: //X-axis rotation
+			if (mods & GLFW_MOD_SHIFT) {
+				robot->selectedComp->rotateJoint.x -= 0.1;
+			} else {
+				robot->selectedComp->rotateJoint.x += 0.1;
+			}
+			break;
+		case GLFW_KEY_Y: //Y-axis rotation
+			if (mods & GLFW_MOD_SHIFT) {
+				robot->selectedComp->rotateJoint.y -= 0.1;
+			} else {
+				robot->selectedComp->rotateJoint.y += 0.1;
+			}
+			break;
+		case GLFW_KEY_Z: //Z-axis rotation
+			if (mods & GLFW_MOD_SHIFT) {
+				robot->selectedComp->rotateJoint.z -= 0.1;
+			} else {
+				robot->selectedComp->rotateJoint.z += 0.1;
+			}
+			break;
+		case GLFW_KEY_ESCAPE:
+			if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
+				glfwSetWindowShouldClose(window, GL_TRUE);
+			}
+			break;
+		}
 	}
 }
+
+
 
 static void init()
 {
@@ -144,116 +324,9 @@ static void init()
 	jointSphere->loadMesh(RES_DIR + "sphere.obj");
 	jointSphere->init();
 
-
-
-
-
-
-	
-
-
-	//Initialize Body Parts
-
-	auto torso = std::make_shared<Component>(shape);
-	auto head = std::make_shared<Component>(shape);
-	auto upperLeftArm = std::make_shared<Component>(shape);
-	auto lowerLeftArm = std::make_shared<Component>(shape);
-	auto upperRightArm = std::make_shared<Component>(shape);
-	auto lowerRightArm = std::make_shared<Component>(shape);
-	auto upperLeftLeg = std::make_shared<Component>(shape);
-	auto lowerLeftLeg = std::make_shared<Component>(shape);
-	auto upperRightLeg = std::make_shared<Component>(shape);
-	auto lowerRightLeg = std::make_shared<Component>(shape);
-
-	//TORSO
-	torso->transJoint = glm::vec3(0.0f, 0.0f, 0.0f);
-	torso->rotateJoint = glm::vec3(0.1f, 0.0f, 0.0f); //Rotation
-	torso->transMesh = glm::vec3(0.0f, 0.0f, 0.0f);
-	torso->scale = glm::vec3(1.5f, 2.5f, 1.0f);
-	
-	//HEAD
-	head->transJoint = glm::vec3(0.0f, 1.55f, 0.0f);
-	head->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	head->transMesh = glm::vec3(0.0f, 0.0f, 0.0f);
-	head->scale = glm::vec3(0.75f, 0.75f, 0.75f);
-
-	//UPPER LEFT ARM
-	upperLeftArm->transJoint = glm::vec3(-0.75f, 0.95f, 0.0f);
-	upperLeftArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	upperLeftArm->transMesh = glm::vec3(-0.75f, 0.0f, 0.0f);
-	upperLeftArm->scale = glm::vec3(1.5f, 0.5f, 0.5f);
-
-	//LOWER LEFT ARM
-	lowerLeftArm->transJoint = glm::vec3(-0.8f, 0.0f, 0.0f);
-	lowerLeftArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	lowerLeftArm->transMesh = glm::vec3(-0.6f, 0.0f, 0.0f);
-	lowerLeftArm->scale = glm::vec3(1.35f, 0.40f, 0.40f);
-
-	//UPPER RIGHT ARM
-	upperRightArm->transJoint = glm::vec3(0.75f, 0.95f, 0.0f);
-	upperRightArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	upperRightArm->transMesh = glm::vec3(0.75f, 0.0f, 0.0f);
-	upperRightArm->scale = glm::vec3(1.5f, 0.5f, 0.5f);
-
-	//LOWER RIGHT ARM
-	lowerRightArm->transJoint = glm::vec3(0.8f, 0.0f, 0.0f);
-	lowerRightArm->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	lowerRightArm->transMesh = glm::vec3(0.6f, 0.0f, 0.0f);
-	lowerRightArm->scale = glm::vec3(1.35f, 0.40f, 0.40f);
-
-	//UPPER LEFT LEG
-	upperLeftLeg->transJoint = glm::vec3(-0.35f, -1.25f, 0.0f);
-	upperLeftLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	upperLeftLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
-	upperLeftLeg->scale = glm::vec3(0.60f, 1.6f, 0.60f);
-
-	//LOWER LEFT LEG
-	lowerLeftLeg->transJoint = glm::vec3(0.0f, -0.75f, 0.0f);
-	lowerLeftLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	lowerLeftLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
-	lowerLeftLeg->scale = glm::vec3(0.5f, 1.5f, 0.50f);
-
-	//UPPER RIGHT LEG
-	upperRightLeg->transJoint = glm::vec3(0.35f, -1.25f, 0.0f);
-	upperRightLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	upperRightLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
-	upperRightLeg->scale = glm::vec3(0.60f, 1.6f, 0.60f);
-
-	//LOWER RIGHT LEG
-	lowerRightLeg->transJoint = glm::vec3(0.0f, -0.75f, 0.0f);
-	lowerRightLeg->rotateJoint = glm::vec3(0.0f, 0.0f, 0.0f); //Rotation
-	lowerRightLeg->transMesh = glm::vec3(0.0f, -0.75f, 0.0f);
-	lowerRightLeg->scale = glm::vec3(0.5f, 1.5f, 0.50f);
-
-	torso->addChild(head);
-	torso->addChild(upperLeftArm);
-	torso->addChild(upperRightArm);
-	torso->addChild(upperLeftLeg);
-	torso->addChild(upperRightLeg);
-	upperLeftArm->addChild(lowerLeftArm);
-	upperRightArm->addChild(lowerRightArm);
-	upperLeftLeg->addChild(lowerLeftLeg);
-	upperRightLeg->addChild(lowerRightLeg);
-
-	root = torso;
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	robot = make_unique<Robot>(shape);
+	robot->populate_component_list();
+	robot->selectedComp = robot->componentList[0];
 	
 	// Initialize the GLSL programs.
 	prog = make_shared<Program>();
@@ -283,6 +356,7 @@ static void init()
 
 
 
+
 static void render()
 {
 	// Get current frame buffer size.
@@ -302,19 +376,39 @@ static void render()
 	P->multMatrix(glm::perspective(glm::radians(45.0f), aspect, 0.01f, 100.0f));
 	// Apply camera transform.
 	MV->pushMatrix();
-	MV->translate(glm::vec3(0, 0, -10));
+	MV->translate(glm::vec3(0.0f, 1.0f, -10.0f));
 
 
-	double t = glfwGetTime(); //Comment out if you don't want rotation
-	MV->translate(0.0, 1.0, 0.0); //Allows you to set where the camera is located
-	MV->rotate(t, 0.0, 1.0, 0.0); //Comment out if you don't want rotation
+	double t = glfwGetTime();
+    float a = 0.05f;
+    float f = 2.0f;
+    float scale_factor = 1 + (a/2) + ((a/2) * sin(2 * M_PI * f * t));
+	float rotationAngle1 = 1.0f * t;
+	float rotationAngle2 = 7.0f * t;
+	//MV->rotate(t, 0.0, 1.0, 0.0); //Comment out if you don't want automatic rotation
+
+	robot->upperLeftArm->rotationAnimation.x = rotationAngle1; //Comment out if you don't want continuous upper left arm rotation
+	robot->lowerRightLeg->rotationAnimation.y = rotationAngle2; //Comment out if you don't want continuous lower right leg rotation
 
 
+	if (robot->selectedComp) {
+		glm::vec3 originalScale = robot->selectedComp->scale;
+		robot->selectedComp->scale *= scale_factor;
 
-	prog->bind();
-	glUniformMatrix4fv(prog->getUniform("P"), 1, GL_FALSE, glm::value_ptr(P->topMatrix()));
-	root->draw(MV);
-	prog->unbind();
+		prog->bind();
+		glUniformMatrix4fv(prog->getUniform("P"), 1, GL_FALSE, glm::value_ptr(P->topMatrix()));
+		robot->torso->draw(MV);
+		prog->unbind();
+
+		robot->selectedComp->scale = originalScale;
+	}
+	else {
+		prog->bind();
+		glUniformMatrix4fv(prog->getUniform("P"), 1, GL_FALSE, glm::value_ptr(P->topMatrix()));
+		robot->torso->draw(MV);
+		prog->unbind();
+	}
+
 
 	// Pop matrix stacks
 	MV->popMatrix();
