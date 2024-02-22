@@ -380,9 +380,9 @@ static void render()
 
 
 	double t = glfwGetTime();
-    float a = 0.05f;
-    float f = 2.0f;
-    float scale_factor = 1 + (a/2) + ((a/2) * sin(2 * M_PI * f * t));
+	float a = 0.05f;
+	float f = 2.0f;
+	float scale_factor = 1 + (a/2) + ((a/2) * sin(2 * M_PI * f * t));
 	float rotationAngle1 = 1.0f * t;
 	float rotationAngle2 = 7.0f * t;
 	//MV->rotate(t, 0.0, 1.0, 0.0); //Comment out if you don't want automatic rotation
