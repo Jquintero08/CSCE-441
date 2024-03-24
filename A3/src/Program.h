@@ -29,13 +29,14 @@ public:
 	void addUniform(const std::string& name);
 	GLint getAttribute(const std::string& name) const;
 	GLint getUniform(const std::string& name) const;
+	GLuint pid; //I edited this
 
 protected:
 	std::string vShaderName;
 	std::string fShaderName;
 
 private:
-	GLuint pid;
+
 	std::map<std::string, GLint> attributes;
 	std::map<std::string, GLint> uniforms;
 	bool verbose;
