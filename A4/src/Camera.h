@@ -30,9 +30,22 @@ public:
 	void applyProjectionMatrix(std::shared_ptr<MatrixStack> P) const;
 	void applyViewMatrix(std::shared_ptr<MatrixStack> MV) const;
 
-private:
+	void moveForward(float delta);
+	void moveRight(float delta);
+	void moveUp(float delta);
+	void zoomIn();
+	void zoomOut();
+
+	glm::vec3 position;
+	float yaw;
+	float pitch;
+
 	float aspect;
 	float fovy;
+private:
+
+	float minFovy;
+	float maxFovy;
 	float znear;
 	float zfar;
 	glm::vec2 rotations;

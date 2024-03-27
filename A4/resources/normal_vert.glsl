@@ -3,10 +3,12 @@
 uniform mat4 P;
 uniform mat4 MV;
 
-attribute vec4 aPos; // in object space
-attribute vec3 aNor; // in object space
+attribute vec4 aPos;
+attribute vec3 aNor;
 
-varying vec3 color; // Pass to fragment shader
+
+varying vec3 color;
+
 
 void main()
 {

@@ -102,6 +102,7 @@ void Shape::init()
 {
 	// Send the position array to the GPU
 	glGenBuffers(1, &posBufID);
+
 	glBindBuffer(GL_ARRAY_BUFFER, posBufID);
 	glBufferData(GL_ARRAY_BUFFER, posBuf.size() * sizeof(float), &posBuf[0], GL_STATIC_DRAW);
 
