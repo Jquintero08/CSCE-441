@@ -1,0 +1,1 @@
+https://web.mit.edu/djwendel/www/weblogo/shapes/basic-shapes/sphere/sphere.obj
