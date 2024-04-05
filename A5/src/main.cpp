@@ -53,6 +53,7 @@ shared_ptr<Texture> texture0;
 map<string, GLuint> bufIDs;
 int indCount;
 
+shared_ptr<Program> timeVariantShader;
 shared_ptr<Program> bPhShader;
 
 vector<shared_ptr<Material>> materials;
@@ -192,6 +193,13 @@ void checkShaderLinkStatus(GLuint shaderProgram)
 }
 
 
+auto f = [](float x) -> float {
+	return cos(x) + 2.0f;
+	};
+auto df = [](float x) -> float {
+	return -sin(x);
+	};
+
 
 // This function is called once to initialize the scene and OpenGL
 static void init()
@@ -232,6 +240,31 @@ static void init()
 	bPhShader->setVerbose(false);
 
 
+	timeVariantShader = make_shared<Program>();
+	timeVariantShader->setShaderNames(RESOURCE_DIR + "timeVariant_vert.glsl", RESOURCE_DIR + "blinnphong_frag.glsl");
+	timeVariantShader->setVerbose(true);
+	timeVariantShader->init();
+	timeVariantShader->addAttribute("aPos");
+	timeVariantShader->addAttribute("aTex");
+	timeVariantShader->addUniform("MV");
+	timeVariantShader->addUniform("P");
+	timeVariantShader->addUniform("invTransformMV");
+	timeVariantShader->addUniform("t");
+	timeVariantShader->addUniform("texture0");
+	timeVariantShader->addUniform("kd");
+	timeVariantShader->addUniform("ks");
+	timeVariantShader->addUniform("ke");
+	timeVariantShader->addUniform("shininess");
+	timeVariantShader->addUniform("numLights");
+	bPhShader->addUniform("numLights");
+	for (int i = 0; i < 10; ++i) {
+		bPhShader->addUniform("lights[" + std::to_string(i) + "].position");
+		bPhShader->addUniform("lights[" + std::to_string(i) + "].color");
+	}
+
+	timeVariantShader->setVerbose(false);
+
+
 	camera = make_shared<Camera>();
 	camera->setInitDistance(2.0f); // Camera's initial Z translation
 
@@ -246,42 +279,40 @@ static void init()
 	vector<float> texBuf;
 	vector<unsigned int> indBuf;
 
+	const int gridN = 100;
+	const float xMin = 0.0f, xMax = 10.0f;
+	const float thetaMax = 2.0f * M_PI;
 
-
-	int gridN = 50;
-	float radius = 0.5f;
 	for (int i = 0; i <= gridN; ++i) {
-		float theta = M_PI * (float)i / gridN;
+		float x = xMin + (xMax - xMin) * (float)i / (float)gridN;
 		for (int j = 0; j <= gridN; ++j) {
-			float phi = 2.0f * M_PI * (float)j / gridN;
-
-
-			float x = radius * sin(theta) * sin(phi);
-			float y = radius * cos(theta);
-			float z = radius * sin(theta) * cos(phi);
-
+			float theta = thetaMax * (float)j / (float)gridN;
 
 			posBuf.push_back(x);
-			posBuf.push_back(y);
-			posBuf.push_back(z);
+			posBuf.push_back(theta);
+			posBuf.push_back(0.0f);
 
-			norBuf.push_back(x);
-			norBuf.push_back(y);
-			norBuf.push_back(z);
+
+			norBuf.push_back(0.0f);
+			norBuf.push_back(0.0f);
+			norBuf.push_back(0.0f);
+
+
 			texBuf.push_back((float)j / gridN);
 			texBuf.push_back(1.0f - (float)i / gridN);
 		}
 	}
 
+
 	for (int i = 0; i < gridN; ++i) {
 		for (int j = 0; j < gridN; ++j) {
 			int row1 = i * (gridN + 1);
 			int row2 = (i + 1) * (gridN + 1);
-			//Triangle 1
+
 			indBuf.push_back(row1 + j);
 			indBuf.push_back(row2 + j);
 			indBuf.push_back(row1 + j + 1);
-			//Triangle 2
+
 			indBuf.push_back(row1 + j + 1);
 			indBuf.push_back(row2 + j);
 			indBuf.push_back(row2 + j + 1);
@@ -293,13 +324,10 @@ static void init()
 	GLuint tmp[4];
 	glGenBuffers(4, tmp);
 	bufIDs["bPos"] = tmp[0];
-	bufIDs["bNor"] = tmp[1];
 	bufIDs["bTex"] = tmp[2];
 	bufIDs["bInd"] = tmp[3];
 	glBindBuffer(GL_ARRAY_BUFFER, bufIDs["bPos"]);
 	glBufferData(GL_ARRAY_BUFFER, posBuf.size() * sizeof(float), &posBuf[0], GL_STATIC_DRAW);
-	glBindBuffer(GL_ARRAY_BUFFER, bufIDs["bNor"]);
-	glBufferData(GL_ARRAY_BUFFER, norBuf.size() * sizeof(float), &norBuf[0], GL_STATIC_DRAW);
 	glBindBuffer(GL_ARRAY_BUFFER, bufIDs["bTex"]);
 	glBufferData(GL_ARRAY_BUFFER, texBuf.size() * sizeof(float), &texBuf[0], GL_STATIC_DRAW);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bufIDs["bInd"]);
@@ -339,7 +367,7 @@ static void init()
 	//Randomizing Objects (infinite error if done in render)
 	std::random_device rd;
 	std::mt19937 eng(rd());
-	std::uniform_int_distribution<> distr(0, 2);
+	std::uniform_int_distribution<> distr(0, 3);
 	objBunOrTea.resize(100);
 	for (auto& choice : objBunOrTea) {
 		choice = distr(eng);
@@ -376,9 +404,9 @@ static void init()
 	lights.push_back(make_shared<Light>(glm::vec3(-2.0, 0.0, 0.0), glm::vec3(0.7, 0.2, 0.9)));
 	lights.push_back(make_shared<Light>(glm::vec3(3.0, 0.0, 2.5), glm::vec3(0.8, 1.2, 1.0)));
 	lights.push_back(make_shared<Light>(glm::vec3(-2.0, 0.0, 4.0), glm::vec3(0.1, 0.1, 0.4)));
-	lights.push_back(make_shared<Light>(glm::vec3(3.1, 0.0, -2.0), glm::vec3(0.1, 0.1, 0.0)));
+	lights.push_back(make_shared<Light>(glm::vec3(3.2, 0.0, -2.2), glm::vec3(0.8, 0.8, 0.5)));
 	lights.push_back(make_shared<Light>(glm::vec3(-5.0, 0.0, -10.0), glm::vec3(0.0, 0.1, 0.2)));
-	lights.push_back(make_shared<Light>(glm::vec3(1.0, 0.0, 2.75), glm::vec3(0.25, 0.0, 0.15)));
+	lights.push_back(make_shared<Light>(glm::vec3(-3.2, 0.0, -2.2), glm::vec3(0.8, 0.6, 0.9)));
 	lights.push_back(make_shared<Light>(glm::vec3(-4.0, 0.0, 1.0), glm::vec3(0.05, 0.05, 0.05)));
 	lights.push_back(make_shared<Light>(glm::vec3(0.0, 0.0, 0.5), glm::vec3(0.15, 0.15, 0.05)));
 
@@ -412,6 +440,7 @@ static void render()
 	auto MV = make_shared<MatrixStack>();
 
 	shared_ptr<Program> useProg = bPhShader;
+	shared_ptr<Program> tVariantShader = timeVariantShader;
 
 
 	useProg->bind();
@@ -462,21 +491,7 @@ static void render()
 		glUniform3f(useProg->getUniform("ks"), 0.0f, 0.0f, 0.0f);
 		glUniform1f(useProg->getUniform("shininess"), 10.0f);
 
-		glEnableVertexAttribArray(0);
-		glBindBuffer(GL_ARRAY_BUFFER, bufIDs["bPos"]);
-		glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-
-		glEnableVertexAttribArray(1);
-		glBindBuffer(GL_ARRAY_BUFFER, bufIDs["bNor"]);
-		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
-
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bufIDs["bInd"]);
-		glDrawElements(GL_TRIANGLES, indCount, GL_UNSIGNED_INT, (void*)0);
-
-		glBindBuffer(GL_ARRAY_BUFFER, 0);
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
-		glDisableVertexAttribArray(0);
-		glDisableVertexAttribArray(1);
+		sphere->draw(useProg);
 
 		MV->popMatrix();
 	}
@@ -519,76 +534,138 @@ static void render()
 
 			shared_ptr<Shape> currentShape;
 
-			if (objBunOrTea[i * 10 + j] == 0) {
-				currentShape = shape;
+			if ((objBunOrTea[i * 10 + j] == 0) || (objBunOrTea[i * 10 + j] == 1) || (objBunOrTea[i * 10 + j] == 2)) {
+
+				if (objBunOrTea[i * 10 + j] == 0) {
+					currentShape = shape;
+				}
+				else if (objBunOrTea[i * 10 + j] == 1) {
+					currentShape = teapot;
+				}
+				else if (objBunOrTea[i * 10 + j] == 2) {
+					currentShape = ball;
+				}
+
+				glm::vec3 position = gridOrigin + glm::vec3(spacing * j, 0.0f, spacing * i);
+
+
+				glUniform3f(useProg->getUniform("ke"), 0.0f, 0.0f, 0.0f);
+				glUniform3fv(useProg->getUniform("kd"), 1, glm::value_ptr(materials[count % materials.size()]->kd));
+				glUniform3f(useProg->getUniform("ks"), 1.0f, 1.0f, 1.0f);
+				glUniform1f(useProg->getUniform("shininess"), 10.0f);
+				MV->pushMatrix();
+
+				float scale = objScales[i * 10 + j];
+
+
+
+
+				if (currentShape == shape) { //Bunny
+					MV->translate(position);
+					MV->rotate(objRotAngles[count], glm::vec3(0, 1, 0));
+					MV->scale(glm::vec3(scale));
+					MV->translate(glm::vec3(0.0f, -0.335f, 0.0f));
+					MV->rotate(t + objRotAngles[count], glm::vec3(0, 1, 0));
+				}
+				else if (currentShape == teapot) { //Teapot
+					MV->translate(position);
+					MV->rotate(objRotAngles[count], glm::vec3(0, 1, 0));
+					MV->scale(glm::vec3(scale));
+					glm::mat4 shearMatrix = glm::mat4(1.0f);
+					float shearAmount = sin(t) * 1.0f;
+					shearMatrix[1][0] = shearAmount;
+					MV->multMatrix(shearMatrix);
+					MV->translate(glm::vec3(0.0f, -0.005f, 0.0f));
+				}
+				else if (currentShape == ball) { //Ball
+					float bounceHeight = 1.0;
+					float bounceSpeed = 1.3;
+					float offset = (i + j) * 3.0f;
+					float currentTime = static_cast<float>(t) + offset;
+
+					float bounce = bounceHeight - (abs(sin(currentTime * bounceSpeed)) * bounceHeight);
+
+					float phaseAdjustment = M_PI / 2;
+					float adjustedTime = currentTime * bounceSpeed + phaseAdjustment;
+					float squashControlFactor = (pow(sin(adjustedTime), 2) * 3);
+
+					float squashAmount = abs(sin(adjustedTime));
+					float squashFactor = 1.0 - squashControlFactor * 0.15;
+					float stretchFactor = 1.0 + squashControlFactor * 0.7;
+
+					glm::vec3 squashStretchScale = glm::vec3((scale * 0.5) * 0.4 * squashFactor, ((scale * 0.5) * 0.2 * stretchFactor), (scale * 0.5) * 0.4 * squashFactor);
+
+					MV->translate(position);
+					MV->translate(glm::vec3(0.0f, 0.09f, 0.0f));
+					MV->translate(glm::vec3(0, bounce, 0));
+					MV->scale(squashStretchScale);
+				}
+				glUniformMatrix4fv(useProg->getUniform("MV"), 1, GL_FALSE, glm::value_ptr(MV->topMatrix()));
+				glUniformMatrix3fv(useProg->getUniform("invTransformMV"), 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(glm::mat3(MV->topMatrix())))));
+				currentShape->draw(useProg);
+				MV->popMatrix();
+				count++;
 			}
-			else if (objBunOrTea[i * 10 + j] == 1) {
-				currentShape = teapot;
-			}
-			else {
-				currentShape = ball;
-			}
+			else { //Surface of Revolution
+				useProg->unbind();
+				tVariantShader->bind();
 
-			glm::vec3 position = gridOrigin + glm::vec3(spacing * j, 0.0f, spacing * i);
+				glUniform1i(glGetUniformLocation(tVariantShader->pid, "numLights"), lights.size());
+				for (int i = 0; i < lights.size(); ++i) {
+					glUniform1i(glGetUniformLocation(tVariantShader->pid, ("lightEnabled[" + std::to_string(i) + "]").c_str()), 1);
 
 
-			glUniform3f(useProg->getUniform("ke"), 0.0f, 0.0f, 0.0f);
-			//glUniform3fv(useProg->getUniform("ka"), 1, glm::value_ptr(materials[count % materials.size()]->ka));
-			glUniform3fv(useProg->getUniform("kd"), 1, glm::value_ptr(materials[count % materials.size()]->kd));
-			glUniform3f(useProg->getUniform("ks"), 1.0f, 1.0f, 1.0f);
-			glUniform1f(useProg->getUniform("shininess"), 10.0f);
-			MV->pushMatrix();
-
-			float scale = objScales[i * 10 + j];
+					glm::vec4 lightPosCamSpace = MV->topMatrix() * glm::vec4(lights[i]->position, 1.0);
 
 
 
+					glUniform3fv(glGetUniformLocation(tVariantShader->pid, ("lights[" + std::to_string(i) + "].position").c_str()), 1, glm::value_ptr(glm::vec3(lightPosCamSpace)));
+					glUniform3fv(glGetUniformLocation(tVariantShader->pid, ("lights[" + std::to_string(i) + "].color").c_str()), 1, glm::value_ptr(lights[i]->color));
 
-			if (currentShape == shape) { //Bunny
-				MV->translate(position);
-				MV->rotate(objRotAngles[count], glm::vec3(0, 1, 0));
-				MV->scale(glm::vec3(scale));
-				MV->translate(glm::vec3(0.0f, -0.335f, 0.0f));
-				MV->rotate(t + objRotAngles[count], glm::vec3(0, 1, 0));
-			}
-			else if (currentShape == teapot) { //Teapot
-				MV->translate(position);
-				MV->rotate(objRotAngles[count], glm::vec3(0, 1, 0));
-				MV->scale(glm::vec3(scale));
-				glm::mat4 shearMatrix = glm::mat4(1.0f);
-				float shearAmount = sin(t) * 1.0f;
-				shearMatrix[1][0] = shearAmount;
-				MV->multMatrix(shearMatrix);
-				MV->translate(glm::vec3(0.0f, -0.005f, 0.0f));
-			}
-			else if (currentShape == ball) { //Ball
-				float bounceHeight = 1.0;
-				float bounceSpeed = 1.3;
+				}
+
+
+				glm::vec3 position = gridOrigin + glm::vec3(spacing * j, 0.0f, spacing * i);
+				float scale = objScales[i * 10 + j];
+
 				float offset = (i + j) * 3.0f;
-				float currentTime = static_cast<float>(t) + offset;
+				double t = glfwGetTime();
+				glUniform1f(tVariantShader->getUniform("t"), (float)(-(t+offset)));
 
-				float bounce = bounceHeight - (abs(sin(currentTime * bounceSpeed)) * bounceHeight);
+				glUniform3f(tVariantShader->getUniform("ke"), 0.0f, 0.0f, 0.0f);
+				glUniform3fv(tVariantShader->getUniform("kd"), 1, glm::value_ptr(materials[count % materials.size()]->kd));
+				glUniform3f(tVariantShader->getUniform("ks"), 1.0f, 1.0f, 1.0f);
+				glUniform1f(tVariantShader->getUniform("shininess"), 10.0f);
 
-				float phaseAdjustment = M_PI / 2;
-				float adjustedTime = currentTime * bounceSpeed + phaseAdjustment;
-				float squashControlFactor = (pow(sin(adjustedTime), 2) * 3);
 
-				float squashAmount = abs(sin(adjustedTime));
-				float squashFactor = 1.0 - squashControlFactor * 0.15;
-				float stretchFactor = 1.0 + squashControlFactor * 0.7;
-
-				glm::vec3 squashStretchScale = glm::vec3((scale*0.5) * 0.4 * squashFactor, ((scale*0.5) * 0.2 * stretchFactor), (scale*0.5) * 0.4 * squashFactor);
+				MV->pushMatrix();
 
 				MV->translate(position);
-				MV->translate(glm::vec3(0.0f, 0.09f, 0.0f));
-				MV->translate(glm::vec3(0, bounce, 0));
-				MV->scale(squashStretchScale);
+				MV->rotate(M_PI / 2, glm::vec3(0.0f, 0.0f, 1.0f));
+				MV->scale(scale * 0.15);
+				MV->translate(glm::vec3(0., 2.0f, 0.0f));
+				
+				
+				glUniformMatrix4fv(tVariantShader->getUniform("P"), 1, GL_FALSE, value_ptr(P->topMatrix()));
+				glEnableVertexAttribArray(tVariantShader->getAttribute("aPos"));
+				GLSL::checkError(GET_FILE_LINE);
+				glEnableVertexAttribArray(tVariantShader->getAttribute("aTex"));
+				glBindBuffer(GL_ARRAY_BUFFER, bufIDs["bPos"]);
+				glVertexAttribPointer(tVariantShader->getAttribute("aPos"), 3, GL_FLOAT, GL_FALSE, 0, (void*)0);
+				glBindBuffer(GL_ARRAY_BUFFER, bufIDs["bTex"]);
+				glVertexAttribPointer(tVariantShader->getAttribute("aTex"), 2, GL_FLOAT, GL_FALSE, 0, (void*)0);
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, bufIDs["bInd"]);
+				glUniformMatrix4fv(tVariantShader->getUniform("MV"), 1, GL_FALSE, value_ptr(MV->topMatrix()));
+				glUniformMatrix3fv(tVariantShader->getUniform("invTransformMV"), 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(glm::mat3(MV->topMatrix())))));
+				glDrawElements(GL_TRIANGLES, indCount, GL_UNSIGNED_INT, (void*)0);
+				glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+				glBindBuffer(GL_ARRAY_BUFFER, 0);
+				glDisableVertexAttribArray(tVariantShader->getAttribute("aTex"));
+				glDisableVertexAttribArray(tVariantShader->getAttribute("aPos"));
+				tVariantShader->unbind();
+				useProg->bind();
+				MV->popMatrix();
 			}
-			glUniformMatrix4fv(useProg->getUniform("MV"), 1, GL_FALSE, glm::value_ptr(MV->topMatrix()));
-			glUniformMatrix3fv(useProg->getUniform("invTransformMV"), 1, GL_FALSE, glm::value_ptr(glm::transpose(glm::inverse(glm::mat3(MV->topMatrix())))));
-			currentShape->draw(useProg);
-			MV->popMatrix();
-			count++;
 		}
 	}
 

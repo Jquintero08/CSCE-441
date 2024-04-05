@@ -7,6 +7,7 @@ layout(location = 2) in vec2 aTex;
 
 uniform mat4 MV;
 uniform mat4 P;
+
 uniform mat3 invTransformMV;
 
 

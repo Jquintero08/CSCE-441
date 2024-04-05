@@ -50,7 +50,6 @@ void main() {
 
         result += (diffuse + specular) * lights[i].color * attenuation;
     }
-    
 
     fragColor = vec4(result, 1.0);
 }
