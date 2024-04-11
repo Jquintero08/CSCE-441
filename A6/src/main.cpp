@@ -340,7 +340,7 @@ int main(int argc, char **argv)
 								accumColor = accumColor + blinnPhong(hit.n, hit.x, light, shape->diffuse, shape->specular, shape->ambient, shape->exponent, cameraPos);
 							}
 							else {
-								accumColor = accumColor + shape->ambient * light.intensity;
+								accumColor = accumColor + shape->ambient;
 							}
 						}
 
