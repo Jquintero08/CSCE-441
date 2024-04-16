@@ -79,9 +79,10 @@ public:
 	Vec3 specular;
 	Vec3 ambient;
 	double exponent;
+	double reflectiveness;
 
-	Shape(const Vec3& diff, const Vec3& spec, const Vec3& amb, double exp)
-		: diffuse(diff), specular(spec), ambient(amb), exponent(exp) {}
+	Shape(const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
+		: diffuse(diff), specular(spec), ambient(ambi), exponent(expo), reflectiveness(reflect) {}
 
 	virtual std::optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const = 0;
 
@@ -97,8 +98,8 @@ public:
 		return (point - position).normalize();
 	}
 
-	Sphere(const Vec3& pos, const Vec3& sc, const Vec3& diff, const Vec3& spec, const Vec3& amb, double exp)
-		: Shape(diff, spec, amb, exp), position(pos), scale(sc) {}
+	Sphere(const Vec3& pos, const Vec3& sc, const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
+		: Shape(diff, spec, ambi, expo, reflect), position(pos), scale(sc) {}
 
 	std::optional<Hit> Sphere::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
 		Vec3 oc = rayOrigin - position;
@@ -131,8 +132,8 @@ public:
 		return Vec3(normalizedPoint.x / scale.x, normalizedPoint.y / scale.y, normalizedPoint.z / scale.z).normalize();
 	}
 
-	Ellipsoid(const Vec3& pos, const Vec3& sc, const Vec3& diff, const Vec3& spec, const Vec3& amb, double exp)
-		: Shape(diff, spec, amb, exp), position(pos), scale(sc) {}
+	Ellipsoid(const Vec3& pos, const Vec3& sc, const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
+		: Shape(diff, spec, ambi, expo, reflect), position(pos), scale(sc) {}
 
 	std::optional<Hit> Ellipsoid::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
 		Vec3 oc = (rayOrigin - position) / scale;
@@ -164,8 +165,8 @@ public:
 		return normal;
 	}
 
-	Plane(const Vec3& pos, const Vec3& norm, const Vec3& diff, const Vec3& spec, const Vec3& amb, double exp)
-		: Shape(diff, spec, amb, exp), position(pos), normal(norm) {}
+	Plane(const Vec3& pos, const Vec3& norm, const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
+		: Shape(diff, spec, ambi, expo, reflect), position(pos), normal(norm) {}
 
 	std::optional<Hit> Plane::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
 		double denom = normal.dot(rayDirect);
@@ -214,6 +215,9 @@ Vec3 blinnPhong(const Vec3& normal, const Vec3& hitPoint, const Light& light,
 
 
 
+
+
+
 vector<Vec3> generate_rays(int width, int height, Vec3 cameraPos, double fovDegrees, double zPlane) {
 	vector<Vec3> rays;
 	double hHeight = tan((fovDegrees * (M_PI / 180.0)) / 2.0);
@@ -244,7 +248,7 @@ double length(const Vec3& v) {
 
 
 
-bool isShadowed(const Vec3& point, const Vec3& lightDir, const std::vector<std::unique_ptr<Shape>>& shapes, const double lightDist) {
+bool is_shadowed(const Vec3& point, const Vec3& lightDir, const std::vector<std::unique_ptr<Shape>>& shapes, const double lightDist) {
 	for (const auto& shape : shapes) {
 		auto shadowIntersect = shape->intersect(point + lightDir * EPSILON, lightDir);
 		if (shadowIntersect) {
@@ -258,7 +262,49 @@ bool isShadowed(const Vec3& point, const Vec3& lightDir, const std::vector<std::
 }
 
 
+Vec3 trace_ray(const Vec3& rayOrigin, const Vec3& rayDirect, const vector<unique_ptr<Shape>>& shapes, const vector<Light>& lights, const Vec3& cameraPos, int scene, int depth) {
+	if (depth >= 7) {  //Set to 2 for Scene 4, set to higher value for Scene 5
+		return Vec3(0.0, 0.0, 0.0);
+	}
+	
+	Vec3 pixColor(0.0, 0.0, 0.0);
+	double minDist = numeric_limits<double>::infinity();
 
+	for (const auto& shape : shapes) {
+		auto hitOpt = shape->intersect(rayOrigin, rayDirect);
+
+		if (hitOpt) {
+			Hit hit = hitOpt.value();
+			if (hit.s < minDist) {
+				minDist = hit.s;
+				Vec3 accumColor(0.0, 0.0, 0.0);
+
+				for (const auto& light : lights) {
+					Vec3 toLight = (light.position - hit.x).normalize();
+					double lightDist = length(light.position - hit.x);
+
+					if (!is_shadowed(hit.x, toLight, shapes, lightDist) || scene == 1) {
+						accumColor = accumColor + blinnPhong(hit.n, hit.x, light, shape->diffuse, shape->specular, shape->ambient, shape->exponent, cameraPos);
+					}
+					else {
+						accumColor = accumColor + shape->ambient;
+					}
+
+
+				}
+				pixColor = accumColor;
+				if ((scene == 4 || scene == 5) && shape->reflectiveness > 0) {
+					Vec3 reflectDirect = rayDirect - 2 * rayDirect.dot(hit.n) * hit.n;
+					Vec3 reflectOrigin = hit.x + EPSILON * reflectDirect;
+					Vec3 reflectedColor = trace_ray(reflectOrigin, reflectDirect, shapes, lights, reflectOrigin, scene, depth + 1);
+					pixColor = (1 - shape->reflectiveness) * pixColor + shape->reflectiveness * reflectedColor;
+				}
+
+			}
+		}
+	}
+	return pixColor;
+}
 
 
 
@@ -300,9 +346,9 @@ int main(int argc, char **argv)
 	std::vector<Light> lights;
 
 	if (scene == 1 || scene == 2) {
-		shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, -1.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0)); //Red Sphere
-		shapes.push_back(std::make_unique<Sphere>(Vec3(0.5, -1.0, -1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0)); //Green Sphere
-		shapes.push_back(std::make_unique<Sphere>(Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0)); //Blue Sphere
+		shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, -1.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
+		shapes.push_back(std::make_unique<Sphere>(Vec3(0.5, -1.0, -1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
+		shapes.push_back(std::make_unique<Sphere>(Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
 		lights.push_back(Light(Vec3(-2.0, 1.0, 1.0), 1.0));
 	}
 	else if (scene == 3) {
@@ -310,57 +356,32 @@ int main(int argc, char **argv)
 		lights.push_back(Light(Vec3(-1.0, 2.0, -1.0), 0.5));
 		
 
-		shapes.push_back(std::make_unique<Ellipsoid>(Vec3(0.5, 0.0, 0.5), Vec3(0.5, 0.6, 0.2), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0)); //Red Ellipse
-		shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0)); //Green Sphere
-		shapes.push_back(std::make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0)); //Flat Plane
+		shapes.push_back(std::make_unique<Ellipsoid>(Vec3(0.5, 0.0, 0.5), Vec3(0.5, 0.6, 0.2), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Ellipse
+		shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
+		shapes.push_back(std::make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Flat Plane
+	}
+	else if (scene == 4 || scene == 5) {
+		lights.push_back(Light(Vec3(-1.0, 2.0, 1.0), 0.5));
+		lights.push_back(Light(Vec3(0.5, -0.5, 0.0), 0.5));
+		shapes.push_back(std::make_unique<Sphere>(Vec3(0.5, -0.7, 0.5), Vec3(0.3, 0.3, 0.3), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
+		shapes.push_back(std::make_unique<Sphere>(Vec3(1.0, -0.7, 0.0), Vec3(0.3, 0.3, 0.3), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
+		shapes.push_back(std::make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Floor
+		shapes.push_back(std::make_unique<Plane>(Vec3(0.0, 0.0, -3.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Back Wall
+		shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 1
+		shapes.push_back(std::make_unique<Sphere>(Vec3(1.5, 0.0, -1.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 2
 	}
 
 
 	for (int y = 0; y < imageSize; ++y) {
 		for (int x = 0; x < imageSize; ++x) {
 			Vec3 rayDirect = rays[y * imageSize + x];
-			Vec3 pixColor(0.0, 0.0, 0.0);
-			double minDist = std::numeric_limits<double>::infinity();
+			Vec3 pixColor = trace_ray(cameraPos, rayDirect, shapes, lights, cameraPos, scene, 0);
 
-			for (const auto& shape : shapes) {
-				auto hitOpt = shape->intersect(cameraPos, rayDirect);
-
-				if (hitOpt) {
-					Hit hit = hitOpt.value();
-					double distance = hit.s;
-					if (distance < minDist) {
-						minDist = distance;
-						Vec3 accumColor(0.0, 0.0, 0.0);
-
-						for (const auto& light : lights) {
-							Vec3 toLight = (light.position - hit.x).normalize();
-							double lightDist = length(light.position - hit.x);
-
-							if (!isShadowed(hit.x, toLight, shapes, lightDist) || scene == 1) {
-								accumColor = accumColor + blinnPhong(hit.n, hit.x, light, shape->diffuse, shape->specular, shape->ambient, shape->exponent, cameraPos);
-							}
-							else {
-								accumColor = accumColor + shape->ambient;
-							}
-						}
-
-						pixColor = accumColor;
-					}
-				}
-			}
-
-
-			pixColor.x = std::min(std::max(pixColor.x, 0.0), 1.0);
-			pixColor.y = std::min(std::max(pixColor.y, 0.0), 1.0);
-			pixColor.z = std::min(std::max(pixColor.z, 0.0), 1.0);
-
-			image.setPixel(x, y, static_cast<unsigned char>(pixColor.x * 255),
-				static_cast<unsigned char>(pixColor.y * 255),
-				static_cast<unsigned char>(pixColor.z * 255));
+			image.setPixel(x, y, static_cast<unsigned char>(min(max(pixColor.x, 0.0), 1.0) * 255),
+				static_cast<unsigned char>(min(max(pixColor.y, 0.0), 1.0) * 255),
+				static_cast<unsigned char>(min(max(pixColor.z, 0.0), 1.0) * 255));
 		}
 	}
-
-
 
 
 
