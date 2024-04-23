@@ -4,7 +4,6 @@
 #include <cmath>
 #include <optional>
 #include <limits>
-
 #include <glm/glm.hpp>
 #include <glm/gtc/type_ptr.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -18,8 +17,8 @@
 
 #include "Image.h"
 
-// This allows you to skip the `std::` in front of C++ standard library
-// functions. You can also say `using std::cout` to be more selective.
+// This allows you to skip the `` in front of C++ standard library
+// functions. You can also say `using cout` to be more selective.
 // You should never do this in a header file.
 using namespace std;
 const double EPSILON = 1e-5;
@@ -42,8 +41,8 @@ struct BoundingSphere {
 		glm::vec3 rayOriginToCenterVec = rayOrigin - center;
 		float b = glm::dot(rayOriginToCenterVec, rayDirection);
 		float c = glm::dot(rayOriginToCenterVec, rayOriginToCenterVec) - radius * radius;
-		float discriminant = b * b - c;
-		return discriminant > 0;
+		float discrim = b * b - c;
+		return discrim > 0;
 	}
 };
 
@@ -100,11 +99,11 @@ Vec3 create_uniform_hemisphere_sample(const Vec3& normal) {
 	double x = sin(phi) * cos(theta);
 	double y = sin(phi) * sin(theta);
 	double z = cos(phi);
-	Vec3 randomVec(x, y, z);
-	if (randomVec.dot(normal) < 0) {
-		randomVec = -randomVec;
+	Vec3 randVec(x, y, z);
+	if (randVec.dot(normal) < 0) {
+		randVec = -randVec;
 	}
-	return randomVec.normalize();
+	return randVec.normalize();
 }
 
 
@@ -112,8 +111,10 @@ struct Hit {
 	double s;
 	Vec3 x;
 	Vec3 n;
+	glm::vec3 color;
+	bool textured;
 
-	Hit(double s, Vec3 x, Vec3 n) : s(s), x(x), n(n) {}
+	Hit(double s, Vec3 x, Vec3 n, glm::vec3 color = glm::vec3(), bool textured = false) : s(s), x(x), n(n), color(color), textured(textured) {}
 };
 
 class Shape {
@@ -127,7 +128,7 @@ public:
 	Shape(const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
 		: diffuse(diff), specular(spec), ambient(ambi), exponent(expo), reflectiveness(reflect) {}
 
-	virtual std::optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const = 0;
+	virtual optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const = 0;
 
 	virtual ~Shape() = default;
 	virtual Vec3 normalAt(const Vec3& point) const = 0;
@@ -144,19 +145,19 @@ public:
 	Sphere(const Vec3& pos, const Vec3& sc, const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
 		: Shape(diff, spec, ambi, expo, reflect), position(pos), scale(sc) {}
 
-	std::optional<Hit> Sphere::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
+	optional<Hit> Sphere::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
 		Vec3 rayOriginToCenterVec = rayOrigin - position;
 		double a = rayDirect.dot(rayDirect);
 		double b = 2.0 * rayOriginToCenterVec.dot(rayDirect);
 		double c = rayOriginToCenterVec.dot(rayOriginToCenterVec) - (scale.x * scale.x);
-		double discriminant = b * b - 4 * a * c;
-		if (discriminant < 0) {
-			return std::nullopt;
+		double discrim = b * b - 4 * a * c;
+		if (discrim < 0) {
+			return nullopt;
 		}
-		double t = (-b - sqrt(discriminant)) / (2 * a);
+		double t = (-b - sqrt(discrim)) / (2 * a);
 		if (t < 0) {
-			t = (-b + sqrt(discriminant)) / (2 * a);
-			if (t < 0) return std::nullopt;
+			t = (-b + sqrt(discrim)) / (2 * a);
+			if (t < 0) return nullopt;
 		}
 		Vec3 hitPoint = rayOrigin + t * rayDirect;
 		Vec3 normal = normalAt(hitPoint);
@@ -164,6 +165,33 @@ public:
 		return Hit(distance, hitPoint, normal);
 	}
 
+};
+
+class TexturedSphere : public Sphere {
+public:
+	Image texture;
+
+	TexturedSphere(const Vec3& pos, const Vec3& sc, const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect, const string& textureFile)
+		: Sphere(pos, sc, diff, spec, ambi, expo, reflect), texture(textureFile) {}
+
+	glm::vec3 getColorFromTexture(const Vec3& point) const {
+		Vec3 localHit = (point - position).normalize();
+		double u = 0.5 + atan2(localHit.z, localHit.x) / (2 * M_PI);
+		double v = 0.5 - asin(localHit.y) / M_PI;
+		return texture.getColorAt(u, v);
+	}
+
+	virtual optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
+		auto intersectResult = Sphere::intersect(rayOrigin, rayDirect);
+		if (intersectResult) {
+			Hit hit = intersectResult.value();
+			glm::vec3 texColor = getColorFromTexture(hit.x);
+			hit.color = texColor;
+			hit.textured = true;
+			return hit;
+		}
+		return nullopt;
+	}
 };
 
 class Ellipsoid : public Shape {
@@ -178,20 +206,20 @@ public:
 	Ellipsoid(const Vec3& pos, const Vec3& sc, const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
 		: Shape(diff, spec, ambi, expo, reflect), position(pos), scale(sc) {}
 
-	std::optional<Hit> Ellipsoid::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
+	optional<Hit> Ellipsoid::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
 		Vec3 rayOriginToCenterVec = (rayOrigin - position) / scale;
 		Vec3 rayDirectionVec = rayDirect / scale;
 		double a = rayDirectionVec.dot(rayDirectionVec);
 		double b = 2.0 * rayOriginToCenterVec.dot(rayDirectionVec);
 		double c = rayOriginToCenterVec.dot(rayOriginToCenterVec) - 1.0;
-		double discriminant = b * b - 4 * a * c;
-		if (discriminant < 0) {
-			return std::nullopt;
+		double discrim = b * b - 4 * a * c;
+		if (discrim < 0) {
+			return nullopt;
 		}
-		double t = (-b - sqrt(discriminant)) / (2 * a);
+		double t = (-b - sqrt(discrim)) / (2 * a);
 		if (t < 0) {
-			t = (-b + sqrt(discriminant)) / (2 * a);
-			if (t < 0) return std::nullopt;
+			t = (-b + sqrt(discrim)) / (2 * a);
+			if (t < 0) return nullopt;
 		}
 		Vec3 hitPoint = rayOrigin + t * rayDirect;
 		Vec3 normal = normalAt(hitPoint);
@@ -210,9 +238,9 @@ public:
 	Plane(const Vec3& pos, const Vec3& norm, const Vec3& diff, const Vec3& spec, const Vec3& ambi, double expo, double reflect)
 		: Shape(diff, spec, ambi, expo, reflect), position(pos), normal(norm) {}
 
-	std::optional<Hit> Plane::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
+	optional<Hit> Plane::intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
 		double denom = normal.dot(rayDirect);
-		if (std::abs(denom) > EPSILON) {
+		if (abs(denom) > EPSILON) {
 			Vec3 posRayOrigin = position - rayOrigin;
 			double t = posRayOrigin.dot(normal) / denom;
 			if (t >= 0) {
@@ -221,7 +249,7 @@ public:
 				return Hit(t, hitPoint, normalAtPoint);
 			}
 		}
-		return std::nullopt;
+		return nullopt;
 	}
 
 
@@ -238,7 +266,7 @@ public:
 		: Shape(diff, spec, ambi, expo, reflect), position(pos), size(size) {}
 
 	// Method to determine if a ray intersects with the cube
-	std::optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
+	optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirect) const override {
 		// Calculate the minimum and maximum bounds of the cube
 		Vec3 minBound = position - Vec3(size / 2, size / 2, size / 2);
 		Vec3 maxBound = position + Vec3(size / 2, size / 2, size / 2);
@@ -255,7 +283,7 @@ public:
 
 		// Exit early if no valid intersection exists
 		if ((tMin > tyMax) || (tyMin > tMax))
-			return std::nullopt;
+			return nullopt;
 
 		// Update min and max t values for valid intersection intervals
 		if (tyMin > tMin) tMin = tyMin;
@@ -267,18 +295,18 @@ public:
 		if (tzMin > tzMax) swap(tzMin, tzMax);
 
 		if ((tMin > tzMax) || (tzMin > tMax))
-			return std::nullopt;
+			return nullopt;
 
 		if (tzMin > tMin) tMin = tzMin;
 		if (tzMax < tMax) tMax = tzMax;
 
 		// Ensure we only consider intersections in the positive ray direction
 		if (tMin < 0 && tMax < 0)
-			return std::nullopt;
+			return nullopt;
 
 		double t = tMin >= 0 ? tMin : tMax;
 		if (t < 0)
-			return std::nullopt;
+			return nullopt;
 
 		// Calculate the hit point and determine the normal at that point
 		Vec3 hitPoint = rayOrigin + t * rayDirect;
@@ -302,7 +330,7 @@ public:
 
 
 bool intersect_triangle(const glm::vec3& orig, const glm::vec3& dir, const glm::vec3& vert0, const glm::vec3& vert1, const glm::vec3& vert2, double& t, double& u, double& v) {
-	//Code Interpreted from raytri.c code @ https://fileadmin.cs.lth.se/cs/Personal/Tomas_Akenine-Moller/raytri/
+	//I interpreted this code from raytri.c code @ https://fileadmin.cs.lth.se/cs/Personal/Tomas_Akenine-Moller/raytri/
 	glm::vec3 edge1 = vert1 - vert0;
 	glm::vec3 edge2 = vert2 - vert0;
 	glm::vec3 pvec = glm::cross(dir, edge2);
@@ -344,7 +372,7 @@ public:
 		: Shape(diff, spec, ambi, expo, 0.0), vert0(v0), vert1(v1), vert2(v2),
 		norm0(n0), norm1(n1), norm2(n2) {}
 
-	std::optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirection) const override {
+	optional<Hit> intersect(const Vec3& rayOrigin, const Vec3& rayDirection) const override {
 		double t, u, v;
 		bool intersect = intersect_triangle(glm::vec3(rayOrigin.x, rayOrigin.y, rayOrigin.z),
 			glm::vec3(rayDirection.x, rayDirection.y, rayDirection.z), vert0, vert1, vert2, t, u, v);
@@ -359,7 +387,7 @@ public:
 
 			return Hit(t, Vec3(hitPoint.x, hitPoint.y, hitPoint.z), Vec3(interpNormal.x, interpNormal.y, interpNormal.z));
 		}
-		return std::nullopt;
+		return nullopt;
 	}
 
 	Vec3 normalAt(const Vec3& point) const override {
@@ -385,8 +413,8 @@ Vec3 blinnPhong(const Vec3& normal, const Vec3& hitPoint, const Light& light, co
 	Vec3 lightColor = light.intensity * Vec3(1.0, 1.0, 1.0);
 
 	Vec3 ambient = ambientColor;
-	Vec3 diffuse = diffuseColor * std::max(N.dot(L), 0.0);
-	Vec3 specular = specularColor * pow(std::max(N.dot(H), 0.0), specExponent);
+	Vec3 diffuse = diffuseColor * max(N.dot(L), 0.0);
+	Vec3 specular = specularColor * pow(max(N.dot(H), 0.0), specExponent);
 
 
 	return ambient + (diffuse + specular) * lightColor;
@@ -441,13 +469,12 @@ vector<Vec3> create_rays_8(int width, int height, glm::vec3 position, glm::vec3 
 	return rays;
 }
 
-
 double length(const Vec3& v) {
 	return sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
 
-bool is_shadowed(const Vec3& point, const Vec3& lightDir, const std::vector<std::unique_ptr<Shape>>& shapes, const double lightDist) {
+bool is_shadowed(const Vec3& point, const Vec3& lightDir, const vector<unique_ptr<Shape>>& shapes, const double lightDist) {
 	for (const auto& shape : shapes) {
 		auto shadowIntersect = shape->intersect(point + lightDir * EPSILON, lightDir);
 		if (shadowIntersect) {
@@ -475,7 +502,7 @@ double calculate_ambient_occlusion(const Vec3& hitPoint, const Vec3& normal, con
 
 
 Vec3 trace_ray(const Vec3& rayOrigin, const Vec3& rayDirect, const vector<unique_ptr<Shape>>& shapes, const BoundingSphere& boundingSphere, const vector<Light>& lights, const Vec3& cameraPos, int scene, int depth) {
-	if (depth >= 7) {  //Set to 2 for Scene 4, set to higher value for Scene 5
+	if (depth >= 7) {  //Set to 2 for Scene 4, set to a higher value for Scene 5
 		return Vec3(0.0, 0.0, 0.0);
 	}
 
@@ -487,37 +514,57 @@ Vec3 trace_ray(const Vec3& rayOrigin, const Vec3& rayDirect, const vector<unique
 	double minDist = numeric_limits<double>::infinity();
 
 	for (const auto& shape : shapes) {
-		auto hitOpt = shape->intersect(rayOrigin, rayDirect);
+		auto intersectResult = shape->intersect(rayOrigin, rayDirect);
 
-		if (hitOpt) {
-			Hit hit = hitOpt.value();
+		if (intersectResult) {
+			Hit hit = intersectResult.value();
 			if (hit.s < minDist) {
 				minDist = hit.s;
 				Vec3 accumColor(0.0, 0.0, 0.0);
 
-				for (const auto& light : lights) {
-					Vec3 toLight = (light.position - hit.x).normalize();
-					double lightDist = length(light.position - hit.x);
+				TexturedSphere* texturedSphere = dynamic_cast<TexturedSphere*>(shape.get());
+				if (texturedSphere != nullptr) {
+					glm::vec3 texColor = texturedSphere->getColorFromTexture(hit.x);
+					Vec3 baseColor(texColor.r, texColor.g, texColor.b);
 
-					if (!is_shadowed(hit.x, toLight, shapes, lightDist) || scene == 1) {
-						accumColor = accumColor + blinnPhong(hit.n, hit.x, light, shape->diffuse, shape->specular, shape->ambient, shape->exponent, cameraPos);
+					for (const auto& light : lights) {
+						Vec3 toLight = (light.position - hit.x).normalize();
+						double lightDist = length(light.position - hit.x);
+
+						if (!is_shadowed(hit.x, toLight, shapes, lightDist)) {
+							accumColor = accumColor + blinnPhong(hit.n, hit.x, light, baseColor, texturedSphere->specular, texturedSphere->ambient, texturedSphere->exponent, cameraPos);
+						}
+						else {
+							accumColor = accumColor + texturedSphere->ambient * baseColor;
+						}
 					}
-					else {
-						accumColor = accumColor + shape->ambient;
-					}
-
-
 				}
-				pixColor = accumColor;
-				if ((scene == 4 || scene == 5) && shape->reflectiveness > 0) {
+				else {
+					for (const auto& light : lights) {
+						Vec3 toLight = (light.position - hit.x).normalize();
+						double lightDist = length(light.position - hit.x);
+
+						if (!is_shadowed(hit.x, toLight, shapes, lightDist) || scene == 1) {
+							accumColor = accumColor + blinnPhong(hit.n, hit.x, light, shape->diffuse, shape->specular, shape->ambient, shape->exponent, cameraPos);
+						}
+						else {
+							accumColor = accumColor + shape->ambient;
+						}
+					}
+				}
+
+				if (shape->reflectiveness > 0) {
 					Vec3 reflectDirect = rayDirect - 2 * rayDirect.dot(hit.n) * hit.n;
 					Vec3 reflectOrigin = hit.x + EPSILON * reflectDirect;
 					Vec3 reflectedColor = trace_ray(reflectOrigin, reflectDirect, shapes, boundingSphere, lights, reflectOrigin, scene, depth + 1);
-					pixColor = (1 - shape->reflectiveness) * pixColor + shape->reflectiveness * reflectedColor;
+					accumColor = (1 - shape->reflectiveness) * accumColor + shape->reflectiveness * reflectedColor;
 				}
+
+				pixColor = accumColor;
 			}
 		}
 	}
+
 	return pixColor;
 }
 
@@ -535,15 +582,17 @@ Vec3 trace_ray_scene9(const Vec3& rayOrigin, const Vec3& rayDirect, const vector
 	double minDist = numeric_limits<double>::infinity();
 
 	for (const auto& shape : shapes) {
-		auto hitOpt = shape->intersect(rayOrigin, rayDirect);
-		if (hitOpt) {
-			Hit hit = hitOpt.value();
+		auto intersectResult = shape->intersect(rayOrigin, rayDirect);
+		if (intersectResult) {
+			Hit hit = intersectResult.value();
 			if (hit.s < minDist) {
 				minDist = hit.s;
 				Vec3 accumColor(0.0, 0.0, 0.0);
 
 				double ao = calculate_ambient_occlusion(hit.x, hit.n, shapes);
-				Vec3 ambientAO = shape->ambient * (1.0 - ao);
+
+
+				Vec3 ambientAO = shape->diffuse * shape->ambient * (1.0 - ao);
 
 				for (const auto& light : lights) {
 					Vec3 toLight = (light.position - hit.x).normalize();
@@ -556,13 +605,16 @@ Vec3 trace_ray_scene9(const Vec3& rayOrigin, const Vec3& rayDirect, const vector
 						accumColor = accumColor + ambientAO;
 					}
 				}
-				pixColor = accumColor;
+				Vec3 reflectedColor(0.0, 0.0, 0.0);
 				if (shape->reflectiveness > 0) {
 					Vec3 reflectDirect = rayDirect - 2 * rayDirect.dot(hit.n) * hit.n;
 					Vec3 reflectOrigin = hit.x + EPSILON * reflectDirect;
-					Vec3 reflectedColor = trace_ray_scene9(reflectOrigin, reflectDirect, shapes, boundingSphere, lights, cameraPos, depth + 1);
-					pixColor = (1 - shape->reflectiveness) * pixColor + shape->reflectiveness * reflectedColor;
+					reflectedColor = trace_ray_scene9(reflectOrigin, reflectDirect, shapes, boundingSphere, lights, reflectOrigin, depth + 1);
 				}
+
+				double reflectionRatio = 0.3;
+				double localRatio = 0.7;
+				pixColor = localRatio * accumColor + reflectionRatio * reflectedColor;
 			}
 		}
 	}
@@ -570,23 +622,23 @@ Vec3 trace_ray_scene9(const Vec3& rayOrigin, const Vec3& rayDirect, const vector
 }
 
 
-bool loadMesh(const std::string& meshName, std::vector<std::unique_ptr<Shape>>& shapes, BoundingSphere& boundingSphere, const Vec3& materialDiffuse, const Vec3& materialSpecular, const Vec3& materialAmbient, double exponent) {
+bool loadMesh(const string& meshName, vector<unique_ptr<Shape>>& shapes, BoundingSphere& boundingSphere, const Vec3& materialDiffuse, const Vec3& materialSpecular, const Vec3& materialAmbient, double exponent) {
 	tinyobj::attrib_t attrib;
-	std::vector<tinyobj::shape_t> lShapes;
-	std::vector<tinyobj::material_t> materials;
-	std::string err;
+	vector<tinyobj::shape_t> lShapes;
+	vector<tinyobj::material_t> materials;
+	string err;
 
 	tinyobj::LoadObj(&attrib, &lShapes, &materials, &err, meshName.c_str());
 
-	glm::vec3 minV(std::numeric_limits<float>::max());
-	glm::vec3 maxV(-std::numeric_limits<float>::max());
+	glm::vec3 minV(numeric_limits<float>::max());
+	glm::vec3 maxV(-numeric_limits<float>::max());
 
 	for (const auto& shape : lShapes) {
 		size_t index_offset = 0;
 		for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); f++) {
 			int fv = shape.mesh.num_face_vertices[f];
-			std::vector<glm::vec3> vertices;
-			std::vector<glm::vec3> normals;
+			vector<glm::vec3> vertices;
+			vector<glm::vec3> normals;
 
 			for (size_t v = 0; v < fv; v++) {
 				tinyobj::index_t idx = shape.mesh.indices[index_offset + v];
@@ -604,7 +656,7 @@ bool loadMesh(const std::string& meshName, std::vector<std::unique_ptr<Shape>>& 
 				}
 			}
 
-			shapes.push_back(std::make_unique<Triangle>(vertices[0], vertices[1], vertices[2], normals[0], normals[1], normals[2], materialDiffuse, materialSpecular, materialAmbient, exponent));
+			shapes.push_back(make_unique<Triangle>(vertices[0], vertices[1], vertices[2], normals[0], normals[1], normals[2], materialDiffuse, materialSpecular, materialAmbient, exponent));
 			index_offset += fv;
 		}
 	}
@@ -625,7 +677,7 @@ int main(int argc, char** argv)
 {
 	if (argc < 4) {
 		cout << "Usage: A6 <SCENE> <IMAGE SIZE> <IMAGE FILENAME>" << endl;
-		cout << "<SCENE> should be 1-9" << endl;
+		cout << "<SCENE> should be 0-9" << endl;
 		return 0;
 	}
 	int scene = stoi(argv[1]);
@@ -635,8 +687,8 @@ int main(int argc, char** argv)
 	Image image(imageSize, imageSize);
 
 
-	std::vector<std::unique_ptr<Shape>> shapes;
-	std::vector<Light> lights;
+	vector<unique_ptr<Shape>> shapes;
+	vector<Light> lights;
 
 	BoundingSphere boundingSphere;
 
@@ -649,10 +701,12 @@ int main(int argc, char** argv)
 
 		vector<Vec3> rays = create_rays_8(imageSize, imageSize, cameraPos, cameraLookAt, cameraUpVec, fov, zPlane);
 
-		shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, -1.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
-		shapes.push_back(std::make_unique<Sphere>(Vec3(0.5, -1.0, -1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
-		shapes.push_back(std::make_unique<Sphere>(Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
+		shapes.push_back(make_unique<Sphere>(Vec3(-0.5, -1.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
+		shapes.push_back(make_unique<Sphere>(Vec3(0.5, -1.0, -1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
+		shapes.push_back(make_unique<Sphere>(Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
 		lights.push_back(Light(Vec3(-2.0, 1.0, 1.0), 1.0));
+
+		
 
 		for (int y = 0; y < imageSize; ++y) {
 			for (int x = 0; x < imageSize; ++x) {
@@ -666,13 +720,25 @@ int main(int argc, char** argv)
 		Vec3 cameraPos(0, 0, 5);
 		double fov = 45.0;
 		double zPlane = 4.0;
+		if (scene == 0) {
+			// ========================= Change to your correct path =========================
+			string texturePath = "C:/Users/Jakey/Desktop/Spring2024/CSCE441/A6/resources/Fray.jpg";
+			lights.push_back(Light(Vec3(-1.0, 2.0, 1.0), 0.5));
+			lights.push_back(Light(Vec3(0.5, -0.5, 0.0), 0.5));
 
-		vector<Vec3> rays = create_rays(imageSize, imageSize, cameraPos, fov, zPlane);
 
-		if (scene == 1 || scene == 2) {
-			shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, -1.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
-			shapes.push_back(std::make_unique<Sphere>(Vec3(0.5, -1.0, -1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
-			shapes.push_back(std::make_unique<Sphere>(Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
+			shapes.push_back(make_unique<TexturedSphere>(Vec3(0.5, -0.7, 0.5), Vec3(0.3, 0.3, 0.3), Vec3(1.0, 1.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0, texturePath)); //Textured Sphere
+			shapes.push_back(make_unique<Sphere>(Vec3(1.0, -0.7, 0.0), Vec3(0.3, 0.3, 0.3), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
+			shapes.push_back(make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Floor
+			shapes.push_back(make_unique<Plane>(Vec3(0.0, 0.0, -3.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Back Wall
+			shapes.push_back(make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 1
+			shapes.push_back(make_unique<Sphere>(Vec3(1.5, 0.0, -1.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 2
+		}
+
+		else if (scene == 1 || scene == 2) {
+			shapes.push_back(make_unique<Sphere>(Vec3(-0.5, -1.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
+			shapes.push_back(make_unique<Sphere>(Vec3(0.5, -1.0, -1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
+			shapes.push_back(make_unique<Sphere>(Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
 			lights.push_back(Light(Vec3(-2.0, 1.0, 1.0), 1.0));
 		}
 		else if (scene == 3) {
@@ -680,28 +746,28 @@ int main(int argc, char** argv)
 			lights.push_back(Light(Vec3(-1.0, 2.0, -1.0), 0.5));
 
 
-			shapes.push_back(std::make_unique<Ellipsoid>(Vec3(0.5, 0.0, 0.5), Vec3(0.5, 0.6, 0.2), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Ellipse
-			shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
-			shapes.push_back(std::make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Flat Plane
+			shapes.push_back(make_unique<Ellipsoid>(Vec3(0.5, 0.0, 0.5), Vec3(0.5, 0.6, 0.2), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Ellipse
+			shapes.push_back(make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Green Sphere
+			shapes.push_back(make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Flat Plane
 		}
 		else if (scene == 4 || scene == 5) {
 			lights.push_back(Light(Vec3(-1.0, 2.0, 1.0), 0.5));
 			lights.push_back(Light(Vec3(0.5, -0.5, 0.0), 0.5));
 
-			//Uncomment to see the difference between Scene 5 and Scene 9
+			//Uncomment to see the difference between Scene 5 and Scene 9 (Light intensity & location are different)
 			/*
-			shapes.push_back(std::make_unique<Cube>(Vec3(1.0, 1.0, 0.0), 0.75, Vec3(0.5, 0.5, 0.2), Vec3(1.0, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
-			shapes.push_back(std::make_unique<Cube>(Vec3(0.8, 1.5, 0.5), 0.55, Vec3(0.75, 0.5, 0.73), Vec3(0.5, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
-			shapes.push_back(std::make_unique<Cube>(Vec3(-0.7, 0.8, 0.4), 0.55, Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
-			shapes.push_back(std::make_unique<Cube>(Vec3(-1.2, 0.6, 0.65), 0.55, Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
+			shapes.push_back(make_unique<Cube>(Vec3(1.0, 1.0, 0.0), 0.75, Vec3(0.5, 0.5, 0.2), Vec3(1.0, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Yellow Cube
+			shapes.push_back(make_unique<Cube>(Vec3(0.8, 1.5, 0.5), 0.55, Vec3(0.75, 0.5, 0.73), Vec3(0.5, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Pink Cube
+			shapes.push_back(make_unique<Cube>(Vec3(-0.7, 0.8, 0.4), 0.55, Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Cube
+			shapes.push_back(make_unique<Cube>(Vec3(-1.2, 0.6, 0.65), 0.55, Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Cube
 			*/
 
-			shapes.push_back(std::make_unique<Sphere>(Vec3(0.5, -0.7, 0.5), Vec3(0.3, 0.3, 0.3), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
-			shapes.push_back(std::make_unique<Sphere>(Vec3(1.0, -0.7, 0.0), Vec3(0.3, 0.3, 0.3), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
-			shapes.push_back(std::make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Floor
-			shapes.push_back(std::make_unique<Plane>(Vec3(0.0, 0.0, -3.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Back Wall
-			shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 1
-			shapes.push_back(std::make_unique<Sphere>(Vec3(1.5, 0.0, -1.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 2
+			shapes.push_back(make_unique<Sphere>(Vec3(0.5, -0.7, 0.5), Vec3(0.3, 0.3, 0.3), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
+			shapes.push_back(make_unique<Sphere>(Vec3(1.0, -0.7, 0.0), Vec3(0.3, 0.3, 0.3), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
+			shapes.push_back(make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Floor
+			shapes.push_back(make_unique<Plane>(Vec3(0.0, 0.0, -3.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Back Wall
+			shapes.push_back(make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 1
+			shapes.push_back(make_unique<Sphere>(Vec3(1.5, 0.0, -1.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 2
 		}
 		else if (scene == 6 || scene == 7) {
 			if (scene == 7) {
@@ -732,24 +798,24 @@ int main(int argc, char** argv)
 			}
 		}
 		else if (scene == 9) {
-			lights.push_back(Light(Vec3(-1.2, 1.8, 1.0), 0.75));
-			lights.push_back(Light(Vec3(0.5, -0.5, 0.0), 0.5));
+			lights.push_back(Light(Vec3(-1.2, 1.8, 1.0), 1.00));
+			lights.push_back(Light(Vec3(0.5, -0.5, 0.0), 0.75));
 
-			shapes.push_back(std::make_unique<Cube>(Vec3(1.0, 1.0, 0.0), 0.75, Vec3(0.5, 0.5, 0.2), Vec3(1.0, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
-			shapes.push_back(std::make_unique<Cube>(Vec3(0.8, 1.5, 0.5), 0.55, Vec3(0.75, 0.5, 0.73), Vec3(0.5, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
-			shapes.push_back(std::make_unique<Cube>(Vec3(-0.7, 0.8, 0.4), 0.55, Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
-			shapes.push_back(std::make_unique<Cube>(Vec3(-1.2, 0.6, 0.65), 0.55, Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0));
+			shapes.push_back(make_unique<Cube>(Vec3(1.0, 1.0, 0.0), 0.75, Vec3(0.5, 0.5, 0.2), Vec3(1.0, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Yellow Cube
+			shapes.push_back(make_unique<Cube>(Vec3(0.8, 1.5, 0.5), 0.55, Vec3(0.75, 0.5, 0.73), Vec3(0.5, 1.0, 1.0), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Pink Cube
+			shapes.push_back(make_unique<Cube>(Vec3(-0.7, 0.8, 0.4), 0.55, Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Cube
+			shapes.push_back(make_unique<Cube>(Vec3(-1.2, 0.6, 0.65), 0.55, Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Cube
 
-			shapes.push_back(std::make_unique<Sphere>(Vec3(0.5, -0.7, 0.5), Vec3(0.3, 0.3, 0.3), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
-			shapes.push_back(std::make_unique<Sphere>(Vec3(1.0, -0.7, 0.0), Vec3(0.3, 0.3, 0.3), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
-			shapes.push_back(std::make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Floor
-			shapes.push_back(std::make_unique<Plane>(Vec3(0.0, 0.0, -3.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Back Wall
-			shapes.push_back(std::make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 1
-			shapes.push_back(std::make_unique<Sphere>(Vec3(1.5, 0.0, -1.5), Vec3(1.0, 1.0, 1.0), Vec3(), Vec3(), Vec3(), 0, 1.0)); //Reflective Sphere 2
+			shapes.push_back(make_unique<Sphere>(Vec3(0.5, -0.7, 0.5), Vec3(0.3, 0.3, 0.3), Vec3(1.0, 0.0, 0.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Red Sphere
+			shapes.push_back(make_unique<Sphere>(Vec3(1.0, -0.7, 0.0), Vec3(0.3, 0.3, 0.3), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 0.5), Vec3(0.1, 0.1, 0.1), 100.0, 0.0)); //Blue Sphere
+			shapes.push_back(make_unique<Plane>(Vec3(0.0, -1.0, 0.0), Vec3(0.0, 1.0, 0.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Floor
+			shapes.push_back(make_unique<Plane>(Vec3(0.0, 0.0, -3.0), Vec3(0.0, 0.0, 1.0), Vec3(1.0, 1.0, 1.0), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.1, 0.1), 0.0, 0.0)); //Back Wall
+			shapes.push_back(make_unique<Sphere>(Vec3(-0.5, 0.0, -0.5), Vec3(1.0, 1.0, 1.0), Vec3(0.8, 0.0, 0.0), Vec3(0.0, 0.0, 0.0), Vec3(0.45, 0.1, 0.1), 0, 1.0)); //Reflective Sphere 1
+			shapes.push_back(make_unique<Sphere>(Vec3(1.5, 0.0, -1.5), Vec3(1.0, 1.0, 1.0), Vec3(0.5, 0.0, 0.8), Vec3(0.0, 0.0, 0.0), Vec3(0.1, 0.0, 0.2), 0, 1.0)); //Reflective Sphere 2
 
 		}
-
 		if (scene < 9) {
+			vector<Vec3> rays = create_rays(imageSize, imageSize, cameraPos, fov, zPlane);
 
 			for (int y = 0; y < imageSize; ++y) {
 				for (int x = 0; x < imageSize; ++x) {
@@ -761,6 +827,8 @@ int main(int argc, char** argv)
 			}
 		}
 		else {
+			vector<Vec3> rays = create_rays(imageSize, imageSize, cameraPos, fov, zPlane);
+
 			for (int y = 0; y < imageSize; ++y) {
 				for (int x = 0; x < imageSize; ++x) {
 					Vec3 rayDirect = rays[y * imageSize + x];
@@ -776,6 +844,7 @@ int main(int argc, char** argv)
 	image.writeToFile(imageFilename);
 
 	cout << "Rendered scene " << scene << " to " << imageFilename << " with size " << imageSize << "x" << imageSize << endl;
+
 
 	return 0;
 

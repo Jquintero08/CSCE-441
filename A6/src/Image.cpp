@@ -2,8 +2,11 @@
 #include <cassert>
 #include "Image.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
+#include "glm/vec3.hpp"
 
 using namespace std;
 
@@ -13,6 +16,24 @@ Image::Image(int w, int h) :
 	comp(3),
 	pixels(width*height*comp, 0)
 {
+}
+
+
+Image::Image(const string& filename) {
+	int req_comp = 3;
+	unsigned char* data = stbi_load(filename.c_str(), &width, &height, &comp, req_comp);
+	if (data) {
+		pixels.assign(data, data + width * height * comp);
+		stbi_image_free(data);
+		cout << "Texture loaded successfully: " << filename << endl;
+	}
+	else {
+		cerr << "Failed to load texture: " << filename << endl;
+		cerr << "stbi_load failed with error: " << stbi_failure_reason() << endl;
+
+		width = height = comp = 0;
+		pixels.clear();
+	}
 }
 
 Image::~Image()
@@ -58,4 +79,18 @@ void Image::writeToFile(const string &filename)
 	} else {
 		cout << "Couldn't write to " << filename << endl;
 	}
+}
+
+glm::vec3 Image::getColorAt(double u, double v) const {
+	u = fmod(u, 1.0); if (u < 0) u += 1.0;
+	v = fmod(v, 1.0); if (v < 0) v += 1.0;
+	int x = static_cast<int>(u * width);
+	int y = static_cast<int>((1.0 - v) * height);
+	int i = (y * width + x) * comp;
+
+	if (i < 0 || i >= pixels.size()) {
+		return glm::vec3();
+	}
+
+	return glm::vec3(pixels[i + 0] / 255.0f, pixels[i + 1] / 255.0f, pixels[i + 2] / 255.0f);
 }
